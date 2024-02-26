@@ -190,7 +190,8 @@ void LampSmartProLight::send_packet(uint16_t cmd, uint8_t cold, uint8_t warm) {
   
   ble_whiten(&packet.raw[9], 0x12, (uint8_t) seed, 0);
   packet.crc16 = v2_crc16_ccitt(&packet.raw[7], 0x16, ~seed);
-  
+
+  ESP_LOGD(TAG, "Prepared packet: %s", esphome::format_hex_pretty(packet.raw, sizeof(packet)).c_str());  
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gap_config_adv_data_raw(packet.raw, sizeof(packet)));
   ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gap_start_advertising(&ADVERTISING_PARAMS));
   delay(tx_duration_);
