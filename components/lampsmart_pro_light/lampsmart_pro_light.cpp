@@ -6,11 +6,15 @@
 #include <esp_gap_ble_api.h>
 #include <esp_gatts_api.h>
 #include <mbedtls/aes.h>
+#include <freertos/queue.h>
 
 namespace esphome {
 namespace lampsmartpro {
 
 static const char *TAG = "lampsmartpro";
+
+const size_t MAX_PACKET_LEN = 31;
+const size_t MAX_QUEUE_LEN = 5;
 
 #pragma pack(1)
 typedef union {
@@ -19,8 +23,9 @@ typedef union {
     uint8_t packet_number;
     uint16_t type;
     uint32_t identifier;
-    uint8_t var2;
-    uint16_t command;
+    uint8_t _17;
+    uint8_t command;
+    uint8_t _19;
     uint16_t _20;
     uint8_t channel1;
     uint8_t channel2;
@@ -29,7 +34,7 @@ typedef union {
     uint16_t rand;
     uint16_t crc16;
   };
-  uint8_t raw[31];
+  uint8_t raw[MAX_PACKET_LEN];
 } adv_data_t;
 
 static esp_ble_adv_params_t ADVERTISING_PARAMS = {
@@ -92,6 +97,7 @@ void LampSmartProLight::setup() {
   register_service(&LampSmartProLight::on_pair, light_state_ ? "pair_" + light_state_->get_object_id() : "pair");
   register_service(&LampSmartProLight::on_unpair, light_state_ ? "unpair_" + light_state_->get_object_id() : "unpair");
 #endif
+  this->commands_ = xQueueCreate(MAX_QUEUE_LEN, sizeof(LampSmartProCommand *));
 }
 
 light::LightTraits LampSmartProLight::get_traits() {
@@ -142,7 +148,7 @@ void LampSmartProLight::dump_config() {
   ESP_LOGCONFIG(TAG, "  Warm White Temperature: %f mireds", warm_white_temperature_);
   ESP_LOGCONFIG(TAG, "  Constant Brightness: %s", constant_brightness_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Minimum Brightness: %d", min_brightness_);
-  ESP_LOGCONFIG(TAG, "  Transmission Duratoin: %d millis", tx_duration_);
+  ESP_LOGCONFIG(TAG, "  Transmission Duration: %d millis", tx_duration_);
 }
 
 void LampSmartProLight::on_pair() {
@@ -176,33 +182,86 @@ void sign_packet_v3(adv_data_t* packet) {
   }
 }
 
-void LampSmartProLight::send_packet(uint16_t cmd, uint8_t cold, uint8_t warm) {
+LampSmartProCommand::LampSmartProCommand(uint32_t id, uint8_t cmd) {
+  this->identifier_ = id;
+  this->cmd_ = cmd;
+}
+
+size_t LampSmartProCommandV3::build_packet(uint8_t* buf) {
   uint16_t seed = (uint16_t) rand();
 
-  adv_data_t packet = {{
+  adv_data_t *packet = (adv_data_t*)buf;
+  *packet = (adv_data_t) {{
       .prefix = {0x02, 0x01, 0x02, 0x1B, 0x16, 0xF0, 0x08, 0x10, 0x80, 0x00},
-      .packet_number = ++(this->tx_count_),
-      .type = 0x100,
-      .identifier = light_state_ ? light_state_->get_object_id_hash() : 0xcafebabe,
-      .var2 = 0x0,
-      .command = cmd,
+      .packet_number = this->tx_count_,
+      .type = DEVICE_TYPE_LAMP,
+      .identifier = this->identifier_,
+      ._17 = 0,
+      .command = this->cmd_,
+      ._19 = 0,
       ._20 = 0,
-      .channel1 = reversed_ ? warm : cold,
-      .channel2 = reversed_ ? cold : warm,
+      .channel1 = this->par1_,
+      .channel2 = this->par2_,
       .signature_v3 = 0,
       ._26 = 0,
       .rand = seed,
   }};
 
-  sign_packet_v3(&packet);
-  ble_whiten(&packet.raw[9], 0x12, (uint8_t) seed, 0);
-  packet.crc16 = v2_crc16_ccitt(&packet.raw[7], 0x16, ~seed);
+  sign_packet_v3(packet);
+  ble_whiten(&packet->raw[9], 0x12, (uint8_t) seed, 0);
+  packet->crc16 = v2_crc16_ccitt(&packet->raw[7], 0x16, ~seed);
+  
+  return sizeof(*packet);
+}
 
-  ESP_LOGD(TAG, "Prepared packet: %s", esphome::format_hex_pretty(packet.raw, sizeof(packet)).c_str());  
-  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gap_config_adv_data_raw(packet.raw, sizeof(packet)));
-  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gap_start_advertising(&ADVERTISING_PARAMS));
-  delay(tx_duration_);
-  ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gap_stop_advertising());
+void LampSmartProLight::send_packet(uint16_t cmd, uint8_t cold, uint8_t warm) {
+
+  if (++this->tx_count_ == 0) {
+    this->tx_count_ = 1;
+  }
+
+  uint32_t identifier = light_state_ ? light_state_->get_object_id_hash() : 0xcafebabe;
+  LampSmartProCommand *command = new LampSmartProCommandV3(identifier, cmd);
+  command->set_par1(this->reversed_ ? warm : cold);
+  command->set_par2(this->reversed_ ? cold : warm);
+  command->set_tx_count(this->tx_count_);
+  
+  if (xQueueSend(this->commands_, &command, 0) != pdTRUE) {
+    ESP_LOGE(TAG, "Error putting command to queue");
+  }
+}
+
+const uint32_t BLE_WAIT_DURATION = 220;
+
+void LampSmartProLight::loop() {
+  if (!this->parent_->is_active()) {
+    ESP_LOGD(TAG, "Cannot proceed while ESP32BLE is disabled.");
+    return;
+  }
+  if (this->advertising_) {
+    if (millis() - this->op_start_ > this->tx_duration_) {
+      this->advertising_ = false;
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gap_stop_advertising());
+      ESP_LOGD(TAG, "Advertising stop");
+    } else {
+      return;
+    }
+  }
+  LampSmartProCommand *command;
+  
+  if (xQueueReceive(this->commands_, &command, 0) == pdTRUE) {
+    uint8_t packet[MAX_PACKET_LEN];
+
+    size_t packet_len = command->build_packet(packet);
+    ESP_LOGD(TAG, "Prepared packet: %s", esphome::format_hex_pretty(packet, packet_len).c_str());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gap_config_adv_data_raw(packet, packet_len));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gap_start_advertising(&ADVERTISING_PARAMS));
+    ESP_LOGD(TAG, "Advertising start");
+
+    delete command;
+    this->op_start_ = millis();
+    this->advertising_ = true;
+  }
 }
 
 } // namespace lampsmartpro
