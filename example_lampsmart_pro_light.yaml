@@ -2,8 +2,26 @@ external_components:
   # shorthand
   source: github://aronsky/esphome-components
 
+lampsmart_pro_light:
+
 light:
   - platform: lampsmart_pro_light
-    name: Kitchen Light
-    duration: 1000
+    name: V3 light
+    duration: 200
+    # default:
+    #variant: v3
+  - platform: lampsmart_pro_light
+    name: V2 light
+    duration: 200
     default_transition_length: 0s
+    variant: v2
+  - platform: lampsmart_pro_light
+    name: V1a Light
+    duration: 200
+    default_transition_length: 0s
+    variant: v1a
+  - platform: lampsmart_pro_light
+    name: V1b Light
+    duration: 200
+    default_transition_length: 0s
+    variant: v1b
