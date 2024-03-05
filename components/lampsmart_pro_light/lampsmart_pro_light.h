@@ -38,6 +38,8 @@ class LampSmartProCommand {
     enum Variant variant_;
     size_t build_packet_v3(uint8_t *buf);
     size_t build_packet_v1a(uint8_t *buf);
+    size_t build_packet_v1b(uint8_t *buf);
+    size_t build_packet_v1(uint8_t *buf, size_t base);
     uint32_t tx_duration_;
 };
 
@@ -46,18 +48,17 @@ class LampSmartProQueue : public Component, public Parented<esphome::esp32_ble::
     static LampSmartProQueue* get_instance(void);
     void loop() override;
     void put(LampSmartProCommand*);
-  protected:
     LampSmartProQueue(void);
+  protected:
     uint32_t op_start_;
     bool ble_ready_ {};
     bool advertising_ {};
     QueueHandle_t commands_;
     uint32_t tx_duration_;
-  private:
     static LampSmartProQueue* instance_;
 };
 
-class LampSmartProLight : public light::LightOutput, public Component, public EntityBase, public Parented<esphome::esp32_ble::ESP32BLE>
+class LampSmartProLight : public light::LightOutput, public Component, public EntityBase, public Parented<LampSmartProQueue>
 #ifdef USE_API
   , public api::CustomAPIDevice
 #endif
@@ -65,7 +66,6 @@ class LampSmartProLight : public light::LightOutput, public Component, public En
  public:
   void setup() override;
   void dump_config() override;
-  void loop() override;
 
   void set_cold_white_temperature(float cold_white_temperature) { cold_white_temperature_ = cold_white_temperature; }
   void set_warm_white_temperature(float warm_white_temperature) { warm_white_temperature_ = warm_white_temperature; }

@@ -38,7 +38,7 @@ typedef union {
 
 typedef union {
   struct { /* Advertising Data for version 1*/
-    uint8_t prefix[15];
+    uint8_t prefix[8];
     uint8_t command;
     uint16_t group_idx;
     uint8_t channel1;
@@ -50,9 +50,8 @@ typedef union {
     uint8_t r2;
     uint16_t seed;
     uint16_t crc16;
-    uint16_t crc16_2;
   };
-  uint8_t raw[MAX_PACKET_LEN];
+  uint8_t raw[22];
 } adv_data_v1_t;
 #pragma pack(pop)
 
@@ -143,8 +142,7 @@ void LampSmartProLight::setup() {
   register_service(&LampSmartProLight::on_pair, light_state_ ? "pair_" + light_state_->get_object_id() : "pair");
   register_service(&LampSmartProLight::on_unpair, light_state_ ? "unpair_" + light_state_->get_object_id() : "unpair");
 #endif
-  this->queue_ = LampSmartProQueue::get_instance();
-  this->queue_->set_parent(this->parent_);
+  this->queue_ = this->parent_;
 }
 
 light::LightTraits LampSmartProLight::get_traits() {
@@ -257,13 +255,12 @@ size_t LampSmartProCommand::build_packet_v3(uint8_t* buf) {
   
   return sizeof(*packet);
 }
-
-size_t LampSmartProCommand::build_packet_v1a(uint8_t* buf) {
+size_t LampSmartProCommand::build_packet_v1(uint8_t* buf, size_t base) {
   uint16_t seed = (uint16_t) rand() % 65525;
 
-  adv_data_v1_t *packet = (adv_data_v1_t*)buf;
+  adv_data_v1_t *packet = (adv_data_v1_t*)&buf[base];
   *packet = (adv_data_v1_t) {{
-      .prefix = {0x02, 0x01, 0x02, 0x1B, 0x03, 0x77, 0xF8, 0xAA, 0x98, 0x43, 0xAF, 0x0B, 0x46, 0x46, 0x46},
+      .prefix = {0xAA, 0x98, 0x43, 0xAF, 0x0B, 0x46, 0x46, 0x46},
       .command = this->cmd_,
       .group_idx = static_cast<uint16_t>(this->identifier_ & 0xF0FF), // group_index is zero for now
       .channel1 = this->par1_,
@@ -275,17 +272,58 @@ size_t LampSmartProCommand::build_packet_v1a(uint8_t* buf) {
       .r2 = static_cast<uint8_t>(seed ^ 1),  // mimics IR remote behavior
       .seed = htons(seed),
       .crc16 = 0,
-      .crc16_2 = 0,
   }};
 
-  packet->crc16 = htons(v2_crc16_ccitt(&packet->raw[15], 12, ~seed));
-  packet->crc16_2 = htons(v2_crc16_ccitt(&packet->raw[15], 14, v2_crc16_ccitt(&packet->raw[8], 5, 0xffff)));
-  for (size_t i=7; i < sizeof(*packet); i++) {
-    packet->raw[i] = reverse_byte(packet->raw[i]);
+  if (this->cmd_ == CMD_PAIR) {
+    packet->channel1 = static_cast<uint8_t>(packet->group_idx & 0xFF);
+    packet->channel2 = static_cast<uint8_t>(packet->group_idx >> 8);
+    packet->channel3 = 0x81;
   }
-  ble_whiten(&packet->raw[7], 15, sizeof(*packet) - 7, 83);
+
+  packet->crc16 = htons(v2_crc16_ccitt(&packet->raw[8], 12, ~seed));
   
   return sizeof(*packet);
+}
+
+size_t LampSmartProCommand::build_packet_v1a(uint8_t* buf) {
+
+  uint8_t header[] = {0x02, 0x01, 0x02, 0x1B, 0x03, 0x77, 0xF8};
+  const size_t base = 7;
+  const size_t size = 31;
+  
+  for (size_t i=0; i<sizeof(header); i++) {
+    buf[i] = header[i];
+  }
+  build_packet_v1(buf, base);
+  
+  uint16_t* crc16_2 = (uint16_t*) &buf[29];
+  *crc16_2 = htons(v2_crc16_ccitt(&buf[base+8], 14, v2_crc16_ccitt(&buf[base+1], 5, 0xffff)));
+  for (size_t i=base; i < size; i++) {
+    buf[i] = reverse_byte(buf[i]);
+  }
+  ble_whiten(&buf[base], 8+base, size-base, 83);
+  
+  return size;
+}
+
+size_t LampSmartProCommand::build_packet_v1b(uint8_t* buf) {
+
+  uint8_t header[] = {0x02, 0x01, 0x02, 0x1B, 0x03, 0x71, 0x0f, 0x55};
+  const size_t base = 8;
+  const size_t size = 31;
+  
+  for (size_t i=0; i<sizeof(header); i++) {
+    buf[i] = header[i];
+  }
+  build_packet_v1(buf, base);
+  
+  buf[30] = 0xaa;
+  for (size_t i=base; i < size; i++) {
+    buf[i] = reverse_byte(buf[i]);
+  }
+  ble_whiten(&buf[base], 8+base, size-base, 83);
+  
+  return size;
 }
 
 size_t LampSmartProCommand::build_packet(uint8_t* buf) {
@@ -298,6 +336,9 @@ size_t LampSmartProCommand::build_packet(uint8_t* buf) {
       break;
     case VARIANT_1A:
       plen = this->build_packet_v1a(buf);
+      break;
+    case VARIANT_1B:
+      plen = this->build_packet_v1b(buf);
       break;
   }
   
@@ -318,10 +359,6 @@ void LampSmartProLight::send_packet(uint16_t cmd, uint8_t cold, uint8_t warm) {
   command->set_tx_duration(this->tx_duration_);
   
   this->queue_->put(command);
-}
-
-void LampSmartProLight::loop() {
-  this->queue_->loop();
 }
 
 LampSmartProQueue* LampSmartProQueue::instance_ = 0;
