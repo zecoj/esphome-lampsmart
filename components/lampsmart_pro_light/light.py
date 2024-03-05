@@ -16,7 +16,7 @@ from esphome.const import (
     PLATFORM_ESP32,
 )
 
-from . import LampSmartProQueue, CONF_ID
+from . import LampSmartProQueue, CONF_QUEUE_ID
 
 AUTO_LOAD = ["esp32_ble", "."]
 DEPENDENCIES = ["esp32", "lampsmart_pro_light"]
@@ -61,7 +61,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_CONSTANT_BRIGHTNESS, default=False): cv.boolean,
             cv.Optional(CONF_REVERSED, default=False): cv.boolean,
             cv.Optional(CONF_MIN_BRIGHTNESS, default=0x7): cv.hex_uint8_t,
-            cv.GenerateID('queue_id'): cv.use_id(LampSmartProQueue),
+            cv.GenerateID(CONF_QUEUE_ID): cv.use_id(LampSmartProQueue),
             cv.Optional(CONF_VARIANT, default="v3"): cv.enum(LAMP_VARIANTS, lower=True)
         }
     ),
@@ -76,7 +76,7 @@ CONFIG_SCHEMA = cv.All(
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_OUTPUT_ID])
 
-    parent = await cg.get_variable(config['queue_id'])
+    parent = await cg.get_variable(config[CONF_QUEUE_ID])
     cg.add(var.set_parent(parent))
 
     await cg.register_component(var, config)
