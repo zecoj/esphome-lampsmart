@@ -12,6 +12,8 @@ from esphome.const import (
     CONF_REVERSED,
     CONF_MIN_BRIGHTNESS, # New in 2023.5
     CONF_ID,
+    CONF_VARIANT,
+    PLATFORM_ESP32,
 )
 
 AUTO_LOAD = ["esp32_ble"]
@@ -22,7 +24,6 @@ LampSmartProLight = lampsmartpro_ns.class_('LampSmartProLight', cg.Component, li
     cg.Parented.template(esp32_ble.ESP32BLE))
 PairAction = lampsmartpro_ns.class_("PairAction", automation.Action)
 UnpairAction = lampsmartpro_ns.class_("UnpairAction", automation.Action)
-
 
 ACTION_ON_PAIR_SCHEMA = cv.All(
     automation.maybe_simple_id(
@@ -40,6 +41,14 @@ ACTION_ON_UNPAIR_SCHEMA = cv.All(
     )
 )
 
+LampSmartProVariant = lampsmartpro_ns.enum("LampSmartProVariant")
+LAMP_VARIANTS = {
+    "v3": LampSmartProVariant.VARIANT_3,
+    "v2": LampSmartProVariant.VARIANT_2,
+    "v1a": LampSmartProVariant.VARIANT_1A,
+    "v1b": LampSmartProVariant.VARIANT_1B,
+}
+
 CONFIG_SCHEMA = cv.All(
     light.RGB_LIGHT_SCHEMA.extend(
         {
@@ -51,12 +60,14 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_REVERSED, default=False): cv.boolean,
             cv.Optional(CONF_MIN_BRIGHTNESS, default=0x7): cv.hex_uint8_t,
             cv.GenerateID(esp32_ble.CONF_BLE_ID): cv.use_id(esp32_ble.ESP32BLE),
+            cv.Optional(CONF_VARIANT, default="v3"): cv.enum(LAMP_VARIANTS, lower=True)
         }
     ),
     cv.has_none_or_all_keys(
         [CONF_COLD_WHITE_COLOR_TEMPERATURE, CONF_WARM_WHITE_COLOR_TEMPERATURE]
     ),
     light.validate_color_temperature_channels,
+    cv.only_on([PLATFORM_ESP32]),
 )
 
 
@@ -83,6 +94,7 @@ async def to_code(config):
     cg.add(var.set_reversed(config[CONF_REVERSED]))
     cg.add(var.set_min_brightness(config[CONF_MIN_BRIGHTNESS]))
     cg.add(var.set_tx_duration(config[CONF_DURATION]))
+    cg.add(var.set_variant(config[CONF_VARIANT]))
 
 
 @automation.register_action(

@@ -17,13 +17,17 @@ const uint8_t CMD_TURN_ON = 0x10;
 const uint8_t CMD_TURN_OFF = 0x11;
 const uint8_t CMD_DIM = 0x21;
 
+enum Variant : int {VARIANT_3, VARIANT_2, VARIANT_1A, VARIANT_1B};
+
 class LampSmartProCommand {
   public:
-    LampSmartProCommand(uint32_t id, uint8_t cmd);
-    virtual size_t build_packet(uint8_t *buf);
+    LampSmartProCommand(enum Variant variant, uint32_t id, uint8_t cmd) : variant_(variant), identifier_(id), cmd_(cmd) {}
     void set_tx_count(uint8_t tx_count) { this->tx_count_ = tx_count; }
     void set_par1(uint8_t par1) { this->par1_ = par1; }
     void set_par2(uint8_t par2) { this->par2_ = par2; }
+    void set_tx_duration(uint32_t tx_duration) { this->tx_duration_ = tx_duration; }
+    uint32_t get_tx_duration(void) { return this->tx_duration_; }
+    size_t build_packet(uint8_t *buf);
     
   protected:
     uint32_t identifier_;
@@ -31,12 +35,26 @@ class LampSmartProCommand {
     uint8_t par1_;
     uint8_t par2_;
     uint8_t tx_count_;
+    enum Variant variant_;
+    size_t build_packet_v3(uint8_t *buf);
+    size_t build_packet_v1a(uint8_t *buf);
+    uint32_t tx_duration_;
 };
 
-class LampSmartProCommandV3 : public LampSmartProCommand {
-  using LampSmartProCommand::LampSmartProCommand;
+class LampSmartProQueue : public Component, public Parented<esphome::esp32_ble::ESP32BLE> {
   public:
-    size_t build_packet(uint8_t *buf) override;
+    static LampSmartProQueue* get_instance(void);
+    void loop() override;
+    void put(LampSmartProCommand*);
+  protected:
+    LampSmartProQueue(void);
+    uint32_t op_start_;
+    bool ble_ready_ {};
+    bool advertising_ {};
+    QueueHandle_t commands_;
+    uint32_t tx_duration_;
+  private:
+    static LampSmartProQueue* instance_;
 };
 
 class LampSmartProLight : public light::LightOutput, public Component, public EntityBase, public Parented<esphome::esp32_ble::ESP32BLE>
@@ -57,6 +75,7 @@ class LampSmartProLight : public light::LightOutput, public Component, public En
   void set_tx_duration(uint32_t tx_duration) { tx_duration_ = tx_duration; }
   void setup_state(light::LightState *state) override { this->light_state_ = state; }
   void write_state(light::LightState *state) override;
+  void set_variant(enum Variant variant) { this->variant_ = variant; }
   light::LightTraits get_traits() override;
   void on_pair();
   void on_unpair();
@@ -72,11 +91,9 @@ class LampSmartProLight : public light::LightOutput, public Component, public En
   bool _is_off;
   uint8_t tx_count_;
   uint32_t tx_duration_;
+  enum Variant variant_;
   light::LightState *light_state_;
-  uint32_t op_start_;
-  bool ble_ready_;
-  bool advertising_;
-  QueueHandle_t commands_;
+  LampSmartProQueue* queue_;
 };
 
 template<typename... Ts> class PairAction : public Action<Ts...> {
