@@ -308,7 +308,7 @@ size_t LampSmartProCommand::build_packet_v1a(uint8_t* buf) {
 
 size_t LampSmartProCommand::build_packet_v1b(uint8_t* buf) {
 
-  uint8_t header[] = {0x02, 0x01, 0x02, 0x1B, 0x03, 0x71, 0x0f, 0x55};
+  uint8_t header[] = {0x02, 0x01, 0x02, 0x1B, 0x03, 0xF9, 0x08, 0x49};
   const size_t base = 8;
   const size_t size = 31;
   
