@@ -45,17 +45,15 @@ class LampSmartProCommand {
 
 class LampSmartProQueue : public Component, public Parented<esphome::esp32_ble::ESP32BLE> {
   public:
-    static LampSmartProQueue* get_instance(void);
+    LampSmartProQueue(void);
     void loop() override;
     void put(LampSmartProCommand*);
-    LampSmartProQueue(void);
   protected:
     uint32_t op_start_;
     bool ble_ready_ {};
     bool advertising_ {};
     QueueHandle_t commands_;
     uint32_t tx_duration_;
-    static LampSmartProQueue* instance_;
 };
 
 class LampSmartProLight : public light::LightOutput, public Component, public EntityBase, public Parented<LampSmartProQueue>

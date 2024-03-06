@@ -361,19 +361,10 @@ void LampSmartProLight::send_packet(uint16_t cmd, uint8_t cold, uint8_t warm) {
   this->queue_->put(command);
 }
 
-LampSmartProQueue* LampSmartProQueue::instance_ = 0;
-
 const size_t MAX_QUEUE_LEN = 10;
 
 LampSmartProQueue::LampSmartProQueue(void) {
   this->commands_ = xQueueCreate(MAX_QUEUE_LEN, sizeof(LampSmartProCommand *));
-}
-
-LampSmartProQueue* LampSmartProQueue::get_instance(void) {
-  if (instance_ == 0) {
-    instance_ = new LampSmartProQueue;
-  }
-  return instance_;
 }
 
 void LampSmartProQueue::put(LampSmartProCommand* command) {
