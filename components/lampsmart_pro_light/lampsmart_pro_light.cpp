@@ -395,6 +395,7 @@ void LampSmartProQueue::loop() {
     size_t packet_len = command->build_packet(packet);
     ESP_LOGD(TAG, "Prepared packet: %s", esphome::format_hex_pretty(packet, packet_len).c_str());
     if (packet_len > 0) {
+      ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_tx_power_set(9, 7));
       ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gap_config_adv_data_raw(packet, packet_len));
       ESP_ERROR_CHECK_WITHOUT_ABORT(esp_ble_gap_start_advertising(&ADVERTISING_PARAMS));
       ESP_LOGD(TAG, "Advertising start");
